@@ -2,54 +2,71 @@ module Main where
 
 import Data.List
 
-data NumberPart =
-    Hundred Char
-    | Somety Char Char
+data TensUnitsPart =
+    Somety Char Char
     | Someteen Char Char
-    | None
+    | NoTensUnits
     deriving (Show, Eq)
 
+data HundredsPart =
+    Hundred Char
+    | NoHundreds
+    deriving (Show, Eq)
 
 data Section = 
-    S NumberPart NumberPart
+    S HundredsPart TensUnitsPart
     deriving Show
 
 
+suffixes = ["", "thousand", "million", "billion", "trillion"]
 
-tosentance::[String] -> String
-tosentance = foldr (++) ""
+toSentance:: String -> String
+toSentance = appendWords . toWordsList
 
-sectionwords:: String -> [String]
-sectionwords = addSpace . addSuffixes . modifyLast . (map towords) . to3digits . padToMultipleof3
+appendWords::[String] -> String
+appendWords = foldr (++) ""
 
-modifyLast:: [String] -> [String]
-modifyLast [] = []
-modifyLast xs = let 
-                    l = length xs
-                    lastSection = last xs 
-                    shouldAppendAnd = (l /= 1) &&  not ("and" `isInfixOf` lastSection)
+toWordsList::String -> [String]
+toWordsList = (map tupleToWords) . sectionTuples
+
+tupleToWords::(String, String, Section) -> String
+tupleToWords (suffix, sectionSep, section) = (towords section) ++ suffix ++ sectionSep
+
+sectionTuples:: String -> [(String, String, Section)]
+sectionTuples = addSuffixes . buildSep . tokenize
+
+
+
+buildSep::[Section] -> [(String, Section)]
+buildSep [] = []
+buildSep (x:[]) = [("", x)]
+buildSep (x:y:[]) = [(finalSep y, x), ("", y)]
+buildSep (x:y:xs) = (" ", x) : (buildSep (y:xs))
+
+finalSep::Section -> String
+finalSep (S NoHundreds NoTensUnits) = ""
+finalSep (S (Hundred _) _ ) = " "
+finalSep (S NoHundreds _) = " and "
+
+
+tokenize :: String -> [Section]
+tokenize = tosectionlist . padToMultipleof3
+
+
+addSuffixes :: [(String, Section)] -> [(String, String, Section)]
+addSuffixes s = let
+                    l = length s
                 in
-                    if shouldAppendAnd then
-                        (init xs) ++  ["and " ++ lastSection]
-                    else
-                        xs
+                    [ build x (l - i) | (x, i) <- zip s [1..], 
+                        let (sectionSep, S a b) = x
+                        in (a /= NoHundreds || b /= NoTensUnits)]
 
-addSpace::[String] -> [String]
-addSpace [] = []
-addSpace (x:y:xs) = x : map (" " ++) (y:xs)
-addSpace (x:xs) = (x:xs)
-
-
-addSpaceToWord::Int -> String -> String
-addSpaceToWord n s 
-    | n == 0 = s
-    | otherwise = " " ++ s
-
-addSuffixes :: [String] -> [String]
-addSuffixes s = reverse [x ++ (if i /= "" then " " else "") ++ i 
-                    | (x, i) <- zip (reverse s) 
-                        ["", "thousand", "million", "billion", "trillion"]
-                    , x /= ""]
+build::(String, Section)->Int->(String, String, Section)
+build s pos = let 
+                    suffix = suffixes !! pos
+                    sep = if suffix /= "" then " " else ""
+                    (sectionsep, section) = s
+              in (sep ++ suffix, sectionsep, section)
 
 padToMultipleof3 :: String -> String
 padToMultipleof3 s = (replicate n '0') ++ s 
@@ -57,42 +74,40 @@ padToMultipleof3 s = (replicate n '0') ++ s
                 d = ((length s) `mod` 3)
                 n = if (d == 0) then 0 else (3 - d)
 
-to3digits :: String -> [Section]
-to3digits []  = []
-to3digits (h:t:u:xs) = (tosection h t u)  : to3digits xs
+tosectionlist :: String -> [Section]
+tosectionlist []  = []
+tosectionlist (h:t:u:xs) = (tosection h t u)  : tosectionlist xs
 
 tosection :: Char -> Char -> Char -> Section
 tosection h t u = S (tohundreds h) (totensunits t u)
 
 
-tohundreds :: Char -> NumberPart 
-tohundreds a = if a == '0' then None else Hundred a
+tohundreds :: Char -> HundredsPart 
+tohundreds a = if a == '0' then NoHundreds else Hundred a
 
-totensunits :: Char -> Char -> NumberPart
+totensunits :: Char -> Char -> TensUnitsPart
 totensunits b c  
-    | b == '0' && c == '0' = None
+    | b == '0' && c == '0' = NoTensUnits
     | b == '0' && c /= '0' = Someteen b c
     | b == '1'             = Someteen b c
     | otherwise            = Somety b c
 
 
 towords :: Section -> String
-towords (S a b) =
-        if (a == None) then
-            if (b == None) then
-                ""
-            else
-                parttowords b
-        else
-            if (b == None) then
-                parttowords a
-            else
-                (parttowords a) ++ " and " ++ (parttowords b)
+towords (S NoHundreds NoTensUnits) = ""
+towords (S NoHundreds b) = tensunitstowords b
+towords (S a NoTensUnits) = hundredstowords a
+towords (S a b) = (hundredstowords a) ++ " and " ++ (tensunitstowords b)
 
-parttowords :: NumberPart -> String
-parttowords s =
+hundredstowords :: HundredsPart -> String
+hundredstowords s =
     case s of
         Hundred a   -> (translateunits a) ++ " hundred"
+        NoHundreds -> ""
+
+tensunitstowords :: TensUnitsPart -> String
+tensunitstowords s =
+    case s of
         Somety a b  -> (translatetens a) ++ if (b /= '0') then 
                                                 " " ++ (translateunits b)
                                             else
@@ -101,7 +116,7 @@ parttowords s =
                             translateunits b
                         else
                             translateteens [a,b]
-        None -> ""
+        NoTensUnits -> ""
           
 translateunits :: Char -> String
 translateunits s =
@@ -150,4 +165,4 @@ main :: IO()
 main = do
     putStrLn "type in a number"
     inp <- getLine
-    putStrLn $ (show . sectionwords) inp
+    putStrLn $ (show . toSentance) inp
